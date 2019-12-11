@@ -394,9 +394,8 @@ auc = exe.run(fetch_list=[auc])
 > 在paddle dataset模式中，由于dataset设计初衷是保证高速，运行于程序底层，与paddlepaddle传统的`feed={dict}`方法不一致，不支持直接通过`train_from_dataset`的函数返回值，得到当前训练中`fetch_list`的值。
 > 
 > 但我们可以通过`paddle/release/1.6`中新增的`fetch_handler`方法创建一个新的线程，监听训练过程，不影响训练的效率。该方法需要继承`fluid.executor.FetchHandler`类中的`handler`方法实现一个监听函数。`fetch_target_vars`是一个list，由我们自行指定哪些变量的值需要被监控。在`exe.train_from_dataset`方法中，指定`fetch_handler`为我们实现的监听函数。可以配置3个超参：
-> - 第一个是`fetch_var_list`，添加我们想要获取的变量的名称，示例中，我们指定为`[self.loss.name]`
-> - 第二个是监听函数的更新频率，单位是s，示例中我们设置为5s更新一次。
-> - 第三个是我们获取的变量的数据类型，若想获得常用的`numpy.ndarray`的格式，则设置为`True`；若想获得`Tensor`，则设置为`False`。
+> - 第一个是`var_dict`，添加我们想要获取的变量的名称，示例中，我们指定为`{"auc": auc_var}`
+> - 第二个是监听函数的更新频率，单位是s，示例中我们设置为30s更新一次。
 
 改动后的训练代码如下
 ```python
@@ -408,12 +407,13 @@ for epoch in range(num_epochs):
               logger.info(
                   "epoch -> {}, auc -> {}, at: {}".format(epoch, auc_value, time.ctime()))
       # 开始训练
-      exe.train_from_dataset(program=fluid.default_main_program(),     
-                             dataset=dataset,
-                             fetch_handler=fetch_vars([auc_var.name], 5, True))
+      var_dict = {"auc": auc_var}
+      exe.train_from_dataset(program=fleet.main_program,
+                            dataset=dataset,
+                            fetch_handler=fetch_vars(var_dict, 30))
       end_time = time.time()
 ```
-如此，便可以在`def handler()`函数中实现训练过程的实时监控，但该监控值的打印频率，不是以mini_batch为单位，而是以时间s为单位，请知悉。
+如此，便可以在`def handler()`函数中实现训练过程的实时监控，但该监控值的打印频率，不是以mini_batch为单位，而是以时间s为单位，请知悉。Fetch hadnler所在的线程与训练线程并发，但不完全解耦。具体表现在：fetch线程在每个epoch开始时进行计时，epoch结束重置计时。训练线程结束时，会检测fetch线程是否仍在工作，会等待fetch线程结束。我们可以利用这一特性实现训练同时进行预测。
 
 ### 运行单机训练
 为了快速验证效果，我们可以用小样本数据快速运行起来，只取前两个part的数据进行训练。在代码目录下，通过键入以下命令启动单机训练。
@@ -566,7 +566,7 @@ elif fleet.is_worker():
 了解了以上区别，便可以非常顺利的将单机模型升级为分布式训练模型。
 
 >### 同步与异步？你可能需要了解的知识
->在`区别三 需要指定分布式运行策略`中，我们简要的提及了目前Paddle参数服务器模式支持的分布式运行策略：`同步Sync`、`半异步Half-Async`、`异步Async`与`GEO-SGD`。这些名词您可能有些陌生，具体介绍可以参考文档[Transpiler综述](www.baidu.com)(汤老师负责的文档)
+>在`区别三 需要指定分布式运行策略`中，我们简要的提及了目前Paddle参数服务器模式支持的分布式运行策略：`同步Sync`、`半异步Half-Async`、`异步Async`与`GEO-SGD`。这些名词您可能有些陌生，具体介绍可以参考文档[Transpiler综述](https://github.com/PaddlePaddle/Fleet/tree/develop/markdown_doc/transpiler)
 
 
 ### 运行：本地模拟分布式
@@ -585,42 +585,101 @@ sh local_cluster.sh async
 get_pserver_program() is deprecated, call get_pserver_programs() to get pserver main and startup in a single call.
 I1126 07:37:49.952580 15056 grpc_server.cc:477] Server listening on 127.0.0.1:36011 successful, selected port: 36011
 ```
-
+当我们开启训练同时进行预测时，即`test=True`，0号节点输出如下
 > trainer.0.log
 ```bash
-I1126 07:37:52.812678 14715 communicator_py.cc:43] using communicator
-I1126 07:37:52.814765 14715 communicator.cc:77] communicator_independent_recv_thread: 1
-I1126 07:37:52.814792 14715 communicator.cc:79] communicator_send_queue_size: 20
-I1126 07:37:52.814805 14715 communicator.cc:81] communicator_min_send_grad_num_before_recv: 20
-I1126 07:37:52.814818 14715 communicator.cc:83] communicator_thread_pool_size: 5
-I1126 07:37:52.814831 14715 communicator.cc:85] communicator_send_wait_times: 5
-I1126 07:37:52.814843 14715 communicator.cc:87] communicator_max_merge_var_num: 20
-I1126 07:37:52.814855 14715 communicator.cc:89] communicator_fake_rpc: 0
-I1126 07:37:52.814868 14715 communicator.cc:90] communicator_merge_sparse_grad: 1
-I1126 07:37:52.814882 14715 communicator.cc:92] communicator_is_sgd_optimizer: 0
-I1126 07:37:52.816067 14715 communicator.cc:330] Communicator start
-I1126 07:37:53.000705 14715 rpc_client.h:107] init rpc client with trainer_id 0
-2019-11-26 07:37:53,110 - INFO - file list: ['train_data/part-1']
-Epoch 0 auc     auc_0.tmp_0             lod: {}
-        dim: 1
-        layout: NCHW
-        dtype: double
-        data: [0.493614]
+I1211 07:38:03.074241  2639 communicator_py.cc:43] using communicator
+I1211 07:38:03.075531  2639 communicator.cc:77] communicator_independent_recv_thread: 1
+I1211 07:38:03.075551  2639 communicator.cc:79] communicator_send_queue_size: 20
+I1211 07:38:03.075559  2639 communicator.cc:81] communicator_min_send_grad_num_before_recv: 20
+I1211 07:38:03.075567  2639 communicator.cc:83] communicator_thread_pool_size: 5
+I1211 07:38:03.075574  2639 communicator.cc:85] communicator_send_wait_times: 5
+I1211 07:38:03.075582  2639 communicator.cc:87] communicator_max_merge_var_num: 20
+I1211 07:38:03.075589  2639 communicator.cc:89] communicator_fake_rpc: 0
+I1211 07:38:03.075597  2639 communicator.cc:90] communicator_merge_sparse_grad: 1
+I1211 07:38:03.075603  2639 communicator.cc:92] communicator_is_sgd_optimizer: 0
+I1211 07:38:03.076393  2639 communicator.cc:330] Communicator start
+I1211 07:38:03.250887  2639 rpc_client.h:107] init rpc client with trainer_id 0
+2019-12-11 07:38:03,349-INFO: file list: ['train_data/part-1']
+2019-12-11 07:38:33,386-INFO: epoch -> 0, Train auc -> [0.52073763], at: Wed Dec 11 07:38:33 2019
+2019-12-11 07:38:33,963-INFO: TEST --> batch: 0 loss: [0.5619225] auc: [0.62876805]
+2019-12-11 07:38:52,787-INFO: TEST --> batch: 100 loss: [0.5390068] auc: [0.64380198]
+2019-12-11 07:39:11,104-INFO: epoch -> 0, Infer auc -> [0.64469833], using time -> 37.7180130482 at: Wed Dec 11 07:38:33 2019
+2019-12-11 07:39:12,108-INFO: epoch 0 finished, use time=68
 
-Epoch 0 auc     auc_0.tmp_0             lod: {}
-        dim: 1
-        layout: NCHW
-        dtype: double
-        data: [0.511984]
+2019-12-11 07:39:42,548-INFO: epoch -> 1, Train auc -> [0.65952079], at: Wed Dec 11 07:39:42 2019
+2019-12-11 07:39:43,029-INFO: TEST --> batch: 0 loss: [0.5427592] auc: [0.69356446]
+2019-12-11 07:40:00,721-INFO: TEST --> batch: 100 loss: [0.50983894] auc: [0.69080892]
+2019-12-11 07:40:18,697-INFO: epoch -> 1, Infer auc -> [0.69057209], using time -> 36.1493270397 at: Wed Dec 11 07:39:42 2019
+2019-12-11 07:40:21,702-INFO: epoch 1 finished, use time=69
 
-2019-11-26 07:38:28,846 - INFO - epoch 0 finished, use time=35
+2019-12-11 07:40:52,232-INFO: epoch -> 2, Train auc -> [0.65601994], at: Wed Dec 11 07:40:52 2019
+2019-12-11 07:40:52,708-INFO: TEST --> batch: 0 loss: [0.5490874] auc: [0.67160076]
+2019-12-11 07:41:11,089-INFO: TEST --> batch: 100 loss: [0.51879776] auc: [0.69162292]
+2019-12-11 07:41:29,389-INFO: epoch -> 2, Infer auc -> [0.69104782], using time -> 37.1578099728 at: Wed Dec 11 07:40:52 2019
+2019-12-11 07:41:30,392-INFO: epoch 2 finished, use time=68
 
-I1126 07:38:28.847295 14715 communicator.cc:347] Communicator stop
-I1126 07:38:28.853050 15143 communicator.cc:266] communicator stopped, recv thread exit
-I1126 07:38:28.947477 15142 communicator.cc:251] communicator stopped, send thread exit
-I1126 07:38:28.947571 14715 communicator.cc:363] Communicator stop done
-2019-11-26 07:38:28,948 - INFO - Distribute Train Success!
+2019-12-11 07:42:00,817-INFO: epoch -> 3, Train auc -> [0.69246893], at: Wed Dec 11 07:42:00 2019
+2019-12-11 07:42:01,348-INFO: TEST --> batch: 0 loss: [0.5522179] auc: [0.71414702]
+2019-12-11 07:42:19,373-INFO: TEST --> batch: 100 loss: [0.51717824] auc: [0.708976]
+2019-12-11 07:42:37,396-INFO: epoch -> 3, Infer auc -> [0.70790727], using time -> 36.5785629749 at: Wed Dec 11 07:42:00 2019
+2019-12-11 07:42:40,402-INFO: epoch 3 finished, use time=69
+
+2019-12-11 07:43:10,919-INFO: epoch -> 4, Train auc -> [0.70500151], at: Wed Dec 11 07:43:10 2019
+2019-12-11 07:43:11,383-INFO: TEST --> batch: 0 loss: [0.5306089] auc: [0.71181952]
+2019-12-11 07:43:29,306-INFO: TEST --> batch: 100 loss: [0.5056221] auc: [0.71151939]
+2019-12-11 07:43:46,912-INFO: epoch -> 4, Infer auc -> [0.71067977], using time -> 35.9929740429 at: Wed Dec 11 07:43:10 2019
+2019-12-11 07:43:47,915-INFO: epoch 4 finished, use time=67
+
+I1211 07:43:48.365736  2639 communicator.cc:347] Communicator stop
+I1211 07:43:48.365864  3066 communicator.cc:251] communicator stopped, send thread exit
+I1211 07:43:48.368557  3067 communicator.cc:266] communicator stopped, recv thread exit
+I1211 07:43:48.368633  2639 communicator.cc:363] Communicator stop done
+2019-12-11 07:43:48,369-INFO: Distribute Train Success!
 ```
+
+1号节点输出如下：
+```bash
+I1211 07:38:03.034493  2640 communicator_py.cc:43] using communicator
+I1211 07:38:03.035778  2640 communicator.cc:77] communicator_independent_recv_thread: 1
+I1211 07:38:03.035799  2640 communicator.cc:79] communicator_send_queue_size: 20
+I1211 07:38:03.035809  2640 communicator.cc:81] communicator_min_send_grad_num_before_recv: 20
+I1211 07:38:03.035816  2640 communicator.cc:83] communicator_thread_pool_size: 5
+I1211 07:38:03.035825  2640 communicator.cc:85] communicator_send_wait_times: 5
+I1211 07:38:03.035831  2640 communicator.cc:87] communicator_max_merge_var_num: 20
+I1211 07:38:03.035840  2640 communicator.cc:89] communicator_fake_rpc: 0
+I1211 07:38:03.035847  2640 communicator.cc:90] communicator_merge_sparse_grad: 1
+I1211 07:38:03.035854  2640 communicator.cc:92] communicator_is_sgd_optimizer: 0
+I1211 07:38:03.036677  2640 communicator.cc:330] Communicator start
+I1211 07:38:03.211432  2640 rpc_client.h:107] init rpc client with trainer_id 1
+2019-12-11 07:38:03,313-INFO: file list: ['train_data/part-0']
+2019-12-11 07:38:33,350-INFO: epoch -> 0, Train auc -> [0.52304332], at: Wed Dec 11 07:38:33 2019
+2019-12-11 07:38:38,357-INFO: epoch 0 finished, use time=35
+
+2019-12-11 07:39:08,392-INFO: epoch -> 1, Train auc -> [0.59577686], at: Wed Dec 11 07:39:08 2019
+2019-12-11 07:39:38,422-INFO: epoch -> 1, Train auc -> [0.60051776], at: Wed Dec 11 07:39:38 2019
+2019-12-11 07:40:08,453-INFO: epoch -> 1, Train auc -> [0.60051776], at: Wed Dec 11 07:40:08 2019
+2019-12-11 07:40:12,459-INFO: epoch 1 finished, use time=94
+
+2019-12-11 07:40:42,494-INFO: epoch -> 2, Train auc -> [0.61744576], at: Wed Dec 11 07:40:42 2019
+2019-12-11 07:40:46,499-INFO: epoch 2 finished, use time=34
+
+2019-12-11 07:41:16,534-INFO: epoch -> 3, Train auc -> [0.63508593], at: Wed Dec 11 07:41:16 2019
+2019-12-11 07:41:22,541-INFO: epoch 3 finished, use time=36
+
+2019-12-11 07:41:52,576-INFO: epoch -> 4, Train auc -> [0.65581558], at: Wed Dec 11 07:41:52 2019
+2019-12-11 07:42:22,606-INFO: epoch -> 4, Train auc -> [0.65639476], at: Wed Dec 11 07:42:22 2019
+2019-12-11 07:42:52,636-INFO: epoch -> 4, Train auc -> [0.65639476], at: Wed Dec 11 07:42:52 2019
+2019-12-11 07:43:22,666-INFO: epoch -> 4, Train auc -> [0.65639476], at: Wed Dec 11 07:43:22 2019
+2019-12-11 07:43:30,675-INFO: epoch 4 finished, use time=128
+
+I1211 07:43:30.675930  2640 communicator.cc:347] Communicator stop
+I1211 07:43:30.675981  3054 communicator.cc:251] communicator stopped, send thread exit
+I1211 07:43:30.685271  3055 communicator.cc:266] communicator stopped, recv thread exit
+I1211 07:43:30.685348  2640 communicator.cc:363] Communicator stop done
+2019-12-11 07:43:30,686-INFO: Distribute Train Success!
+```
+
 #### 方法二 通过`paddle.distributed.launch_ps`运行模拟分布式
 该方法更通用，不需要写特别的脚本即可运行，在代码目录，键入命令：
 ```bash

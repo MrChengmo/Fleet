@@ -86,14 +86,14 @@ def train(params):
         # 初始化含有分布式流程的fleet.startup_program
         exe.run(fleet.startup_program)
         dataset = get_dataset(inputs, params)
-	var_dict = {"auc":auc_var}
+
         for epoch in range(params.epochs):
             start_time = time.time()
 
             class online_infer(fluid.executor.FetchHandler):
                 def handler(self, fetch_target_vars):
                     start_time = time.time()
-		    auc_value = fetch_target_vars["auc"]
+                    auc_value = fetch_target_vars["auc"]
                     current_time = time.ctime()
                     logger.info("epoch -> {}, Train auc -> {}, at: {}".format(
                         epoch, auc_value, current_time))
@@ -109,17 +109,18 @@ def train(params):
 
                         # 调用infer函数，传入模型保存的地址
                         infer_res = run_infer(params, model_path)
-			end_time = time.time()
+                        end_time = time.time()
                         logger.info(
-                            "epoch -> {}, Infer auc -> {}, using time -> {} at: {}".format(
-                                epoch, infer_res["auc"], end_time-start_time ,current_time))
+                            "epoch -> {}, Infer auc -> {}, using time -> {} at: {}"
+                            .format(epoch, infer_res["auc"],
+                                    end_time - start_time, current_time))
 
             # 训练节点运行的是经过分布式裁剪的fleet.mian_program
-            # 以Trick方式实现训练同时预测，确保预测间隔大于预测任务运行时间
+            # 以Trick方式实现训练同时预测，在fetch_handle中可以指定预测间隔，在Demo中设置为30s预测一次
+            var_dict = {"auc": auc_var}
             exe.train_from_dataset(program=fleet.main_program,
                                    dataset=dataset,
-                                   fetch_handler=online_infer(var_dict,
-                                                              30))
+                                   fetch_handler=online_infer(var_dict, 30))
             end_time = time.time()
             logger.info("epoch %d finished, use time=%d\n" %
                         ((epoch), end_time - start_time))
