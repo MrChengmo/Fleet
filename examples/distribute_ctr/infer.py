@@ -84,11 +84,6 @@ def run_infer(params, model_path):
             infer_result = {}
             infer_result['loss'] = infer_loss
             infer_result['auc'] = infer_auc
-            log_path = model_path + '/infer_result.log'
-            logger.info(str(infer_result))
-            with open(log_path, 'w+') as f:
-                f.write(str(infer_result))
-            logger.info("Inference complete")
     return infer_result
 
 
@@ -102,4 +97,5 @@ if __name__ == "__main__":
                 model_list.append(path)
     for model in model_list:
         logger.info("Test model {}".format(model))
-        run_infer(params, model)
+        infer_res = run_infer(params, model)
+        logger.info(str(infer_res))

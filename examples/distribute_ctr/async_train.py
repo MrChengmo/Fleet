@@ -25,6 +25,7 @@ from paddle.fluid.incubate.fleet.parameter_server.distribute_transpiler import f
 from paddle.fluid.transpiler.distribute_transpiler import DistributeTranspilerConfig
 from network import CTR
 from argument import params_args
+from infer import run_infer
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("fluid")
@@ -90,13 +91,34 @@ def train(params):
         for epoch in range(params.epochs):
             start_time = time.time()
 
+            class online_infer(fluid.executor.FetchHandler):
+                def handler(self, fetch_target_vars):
+                    auc_value = fetch_target_vars[0]
+                    current_time = time.ctime()
+                    logger.info("epoch -> {}, Train auc -> {}, at: {}".format(
+                        epoch, auc_value, current_time))
+                    if params.test and fleet.is_first_worker():
+                        # 存储当前全局参数,并保存到e.g: model/epoch_0_online/time_x/ 下
+                        model_path = "/".join([
+                            str(params.model_path),
+                            "epoch_{}_online".format(str(epoch)),
+                            "time_{}".format(str(current_time))
+                        ])
+                        fluid.io.save_persistables(executor=exe,
+                                                   dirname=model_path)
+
+                        # 调用infer函数，传入模型保存的地址
+                        infer_res = run_infer(params, model_path)
+                        logger.info(
+                            "epoch -> {}, Infer auc -> {}, at: {}".format(
+                                epoch, infer_res["auc"], current_time))
+
             # 训练节点运行的是经过分布式裁剪的fleet.mian_program
+            # 以Trick方式实现训练同时预测，确保预测间隔大于预测任务运行时间
             exe.train_from_dataset(program=fleet.main_program,
                                    dataset=dataset,
-                                   fetch_list=[auc_var],
-                                   fetch_info=["Epoch {} auc ".format(epoch)],
-                                   print_period=100,
-                                   debug=False)
+                                   fetch_handler=online_infer([auc_var.name],
+                                                              100))
             end_time = time.time()
             logger.info("epoch %d finished, use time=%d\n" %
                         ((epoch), end_time - start_time))
