@@ -389,13 +389,13 @@ auc = exe.run(fetch_list=[auc])
 ```
 的方式实时获取每个mini_batch的参数变化。这会对我们的训练过程监控会造成一些不便。
 
-> 如何获取dataset模式训练中的参数变化？
-> 
-> 在paddle dataset模式中，由于dataset设计初衷是保证高速，运行于程序底层，与paddlepaddle传统的`feed={dict}`方法不一致，不支持直接通过`train_from_dataset`的函数返回值，得到当前训练中`fetch_list`的值。
-> 
-> 但我们可以通过`paddle/release/1.6`中新增的`fetch_handler`方法创建一个新的线程，监听训练过程，不影响训练的效率。该方法需要继承`fluid.executor.FetchHandler`类中的`handler`方法实现一个监听函数。`fetch_target_vars`是一个list，由我们自行指定哪些变量的值需要被监控。在`exe.train_from_dataset`方法中，指定`fetch_handler`为我们实现的监听函数。可以配置3个超参：
-> - 第一个是`var_dict`，添加我们想要获取的变量的名称，示例中，我们指定为`{"auc": auc_var}`
-> - 第二个是监听函数的更新频率，单位是s，示例中我们设置为30s更新一次。
+如何获取dataset模式训练中的参数变化呢？
+ 
+ 在paddle dataset模式中，由于dataset设计初衷是保证高速，运行于程序底层，与paddlepaddle传统的`feed={dict}`方法不一致，不支持直接通过`train_from_dataset`的函数返回值，得到当前训练中`fetch_list`的值。
+ 
+但我们可以通过`paddle/release/1.6`中新增的`fetch_handler`方法创建一个新的线程，监听训练过程，不影响训练的效率。该方法需要继承`fluid.executor.FetchHandler`类中的`handler`方法实现一个监听函数。`fetch_target_vars`是一个list，由我们自行指定哪些变量的值需要被监控。在`exe.train_from_dataset`方法中，指定`fetch_handler`为我们实现的监听函数。可以配置3个超参：
+- 第一个是`var_dict`，添加我们想要获取的变量的名称，示例中，我们指定为`{"auc": auc_var}`
+- 第二个是监听函数的更新频率，单位是s，示例中我们设置为30s更新一次。
 
 改动后的训练代码如下
 ```python
@@ -403,7 +403,7 @@ for epoch in range(num_epochs):
       start_time = time.time()
       class fetch_vars(fluid.executor.FetchHandler):
           def handler(self, fetch_target_vars):
-              auc_value = fetch_target_vars[0]
+              auc_value = fetch_target_vars["auc"]
               logger.info(
                   "epoch -> {}, auc -> {}, at: {}".format(epoch, auc_value, time.ctime()))
       # 开始训练
