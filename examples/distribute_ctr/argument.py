@@ -55,7 +55,7 @@ def params_args(args=None):
     params.add_argument("-e",
                         "--epochs",
                         type=int,
-                        default=1,
+                        default=5,
                         help="Number of epochs for training.")
 
     # customized parameters
