@@ -34,15 +34,13 @@
     * [区别四 需要区分Pserver与Trainer的运行流程](#区别四-需要区分pserver与trainer的运行流程)
     * [同步与异步？你可能需要了解的知识](#同步与异步你可能需要了解的知识)
     * [运行：本地模拟分布式](#运行本地模拟分布式)
-        * [方法一 运行loc_cluster.sh脚本](#方法一-运行loc_clustersh脚本)
-        * [方法二 通过paddle.distributed.launch_ps运行模拟分布式](#方法二-通过paddledistributedlaunch_ps运行模拟分布式)
+        * [方法 运行loc_cluster.sh脚本](#方法-运行loc_clustersh脚本)
 * [分布式训练——同步模式(Sync)](#分布式训练同步模式sync)
     * [同步模式数据读取](#同步模式数据读取)
     * [同步训练策略配置](#同步训练策略配置)
     * [使用pyreader进行多轮训练](#使用pyreader进行多轮训练)
     * [运行：本地模拟分布式](#运行本地模拟分布式-1)
-        * [方法一 运行loc_cluster.sh脚本](#方法一-运行loc_clustersh脚本-1)
-        * [方法二 通过paddle.distributed.launch_ps运行模拟分布式](#方法二-通过paddledistributedlaunch_ps运行模拟分布式-1)
+        * [方法 运行loc_cluster.sh脚本](#方法-运行loc_clustersh脚本-1)
 * [分布式训练——模型保存及增量训练](#分布式训练模型保存及增量训练)
     * [单机训练中模型的保存](#单机训练中模型的保存)
     * [分布式训练中模型的保存](#分布式训练中模型的保存)
@@ -63,7 +61,7 @@
 
 ## 代码地址
 
-- 示例代码位于：https://github.com/MrChengmo/Fleet/tree/re_ctr/examples/distribute_ctr
+- 示例代码位于：https://github.com/PaddlePaddle/Fleet/tree/develop/examples/distribute_ctr
   
   在工作环境安装git后，在工作目录克隆Fleet代码仓库，示例代码位于`Fleet/example/distribute_ctr`
 - 示例代码结构为：
@@ -571,7 +569,7 @@ elif fleet.is_worker():
 
 ### 运行：本地模拟分布式
 如果暂时没有集群环境，或者想要快速调试代码，可以通过本地多进程模拟分布式来运行分布式训练的代码。
-有两种方法可以进行本地多进程模拟分布式。
+使用下述方法可以进行本地多进程模拟分布式。
 #### 方法 运行`loc_cluster.sh`脚本
 示例代码中，给出了本地模拟分布式的一键启动脚本`loc_cluster.sh async`，在代码目录，通过命令
 ```bash
@@ -731,7 +729,7 @@ for epoch in range(params.epochs):
 执行`exe.run()`时，我们传入的是`CompiledProgram`，同时可以通过加入fetch_list来直接获取我们想要监控的变量。
 
 ### 运行：本地模拟分布式
-同步模式的运行方式与异步方式相似，同样的有两种方式。
+同步模式的运行方式与异步方式相似。
 
 #### 方法 运行`loc_cluster.sh`脚本
 运行`local_cluster.sh`脚本，设置启动命令为`sync`：
